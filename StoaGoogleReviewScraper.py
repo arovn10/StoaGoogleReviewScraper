@@ -18,7 +18,7 @@ properties = [
     "The Waters at Heritage", "The Waters at Hammond"
 ]
 
-ddef get_reviews(prop_name: str, max_reviews: int = 5) -> list[dict]:
+def get_reviews(prop_name: str, max_reviews: int = 5) -> list[dict]:
     """Scrape reviews from Google Maps for a given property name."""
     options = uc.ChromeOptions()
     options.add_argument("--headless=new")
