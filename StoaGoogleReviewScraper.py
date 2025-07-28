@@ -64,6 +64,7 @@ def get_reviews(prop_name, max_reviews=5):
         except Exception:
             continue
 
+    
     driver.quit()
     return reviews
 
