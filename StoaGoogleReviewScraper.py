@@ -1,152 +1,108 @@
-import json
 import time
-import logging
+import json
 import requests
-import undetected_chromedriver as uc
+import pandas as pd
+
+from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.chrome.options import Options
 
-logging.basicConfig(level=logging.INFO)
+# Define properties and URLs
+properties = {
+    "The Waters at Settlers Trace": "https://www.google.com/maps?sca_esv=63099446d56d4ef8&output=search&q=The+Waters+at+Settlers+Trace&source=lnms&entry=mc",
+    "The Waters at Redstone": "https://www.google.com/maps/place/The+Waters+at+Redstone/@30.7362861,-86.5595057,978m/data=!3m2!1e3!4b1!4m6!3m5!1s0x8891731ed5ef4421:0xe82971b01b043e0e!8m2!3d30.7362861!4d-86.5569308",
+    "The Waters at Millerville": "https://www.google.com/maps/place/The+Waters+at+Millerville/@30.4397504,-91.0289876,981m/data=!3m2!1e3!4b1!4m6!3m5!1s0x8626bd7f2db7ca89:0x1d15edca3d614c78!8m2!3d30.4397504!4d-91.0264127",
+    "The Waters at McGowin": "https://www.google.com/maps/place/The+Waters+at+McGowin/@30.6516886,-88.1154892,979m/data=!3m2!1e3!4b1!4m6!3m5!1s0x889a4db406a47bd1:0xa0adc97698cb8809!8m2!3d30.6516886!4d-88.1129143",
+    "The Waters at Freeport": "https://www.google.com/maps/place/The+Waters+at+Freeport/@30.486358,-86.1287459,981m/data=!3m2!1e3!4b1!4m6!3m5!1s0x8893dda15e2f9069:0x3177e609fc299d13!8m2!3d30.486358!4d-86.126171",
+    "The Waters at Crestview": "https://www.google.com/maps/place/The+Waters+at+Crestview/@30.7327129,-86.5707133,1957m/data=!3m1!1e3",
+    "The Waters at Bluebonnet": "https://www.google.com/maps/place/The+Waters+at+Bluebonnet/@30.4147242,-91.0766963,981m/data=!3m2!1e3!4b1!4m6!3m5!1s0x8626a53bc0c94fbf:0x84b7af1708cc8d8d!8m2!3d30.4147242!4d-91.0741214",
+    "The Heights at Picardy": "https://www.google.com/maps/place/The+Heights+at+Picardy/@30.3941704,-91.1028869,982m/data=!3m2!1e3!4b1!4m6!3m5!1s0x8626a56f7f0dc5bf:0xb38345b83bdc892b!8m2!3d30.3941704!4d-91.100312",
+    "The Flats at East Bay": "https://www.google.com/maps/place/The+Flats+at+East+Bay/@30.5014556,-87.8652493,981m/data=!3m2!1e3!4b1!4m6!3m5!1s0x889a3f60ad1dd52d:0x332da4c4b0b0c51e!8m2!3d30.5014556!4d-87.8626744",
+    "The Waters at West Village": "https://www.google.com/maps/place/The+Waters+at+West+Village/@30.2214016,-92.097974,983m/data=!3m2!1e3!4b1!4m6!3m5!1s0x86249fc349920de9:0x7945e14be23642b4!8m2!3d30.2214016!4d-92.0953991",
+    "The Waters at Hammond": "https://www.google.com/maps/place/The+Waters+at+Hammond/@30.4877443,-90.465321,981m/data=!3m2!1e3!4b1!4m6!3m5!1s0x862723fbcc2afb85:0x188d3eeca51192d0!8m2!3d30.4877443!4d-90.4627461"
+}
 
-DOMO_WEBHOOK = "https://stoagroup.domo.com/api/iot/v1/webhook/data/eyJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE3NTMzOTI4MDUsInN0cmVhbSI6IjI2ODFmZjgwNDJlODRkMGU5NzI0NjAyYTYxNTE1ZmNmOm1tbW0tMDA0NC0wNTc0OjUyMzIwNTM5NSJ9.zNgtfCRVytV6_RfB17ap-zkyXOYclCfvTUpTewZTOeo"
+domo_webhook = "https://stoagroup.domo.com/api/iot/v1/webhook/data/eyJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE3NTMzOTI4MDUsInN0cmVhbSI6IjI2ODFmZjgwNDJlODRkMGU5NzI0NjAyYTYxNTE1ZmNmOm1tbW0tMDA0NC0wNTc0OjUyMzIwNTM5NSJ9.zNgtfCRVytV6_RfB17ap-zkyXOYclCfvTUpTewZTOeo"
 
-properties = [
-    "The Waters at Settlers Trace", "The Waters at Redstone", "The Waters at Millerville",
-    "The Waters at McGowin", "The Waters at Freeport", "The Waters at Crestview",
-    "The Waters at Bluebonnet", "The Heights at Picardy", "The Flats at East Bay",
-    "The Waters at West Village", "The Flats at Ransley", "The Waters at Ransley",
-    "The Waters at Heritage", "The Waters at Hammond"
-]
+def accept_gdpr(driver):
+    if 'consent.google.com' in driver.current_url:
+        driver.execute_script("document.getElementsByTagName('form')[0].submit()")
 
-def get_reviews(prop_name: str, max_reviews: int = 5) -> list[dict]:
-    """Scrape reviews from Google Maps for a given property name."""
-    options = uc.ChromeOptions()
-    options.add_argument("--headless=new")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--window-size=1920,1080")
+def wait_for_page(driver):
+    while driver.execute_script('return document.readyState') != 'complete':
+        time.sleep(1)
 
-    driver = uc.Chrome(options=options)
+def scroll_reviews(driver):
     try:
-        driver.get("https://www.google.com/maps")
+        scrollable = driver.find_element(By.XPATH, '//div[contains(@class, "m6QErb DxyBCb")]')
+        for _ in range(8):
+            driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight", scrollable)
+            time.sleep(2)
+    except:
+        pass
 
-        # Wait for the search box and search for the property
-        search_box = WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.ID, "searchboxinput"))
-        )
-        search_box.clear()
-        search_box.send_keys(prop_name)
-        search_box.send_keys(Keys.ENTER)
+def extract_reviews(driver):
+    reviews = []
+    try:
+        container = driver.find_element(By.XPATH, '//div[contains(@class, "m6QErb DxyBCb")]')
+        cards = container.find_elements(By.XPATH, './/div[@data-review-id]')
+        for card in cards:
+            try:
+                name = card.find_element(By.XPATH, './/div[contains(@class,"d4r55")]').text
+            except:
+                name = "No name"
+            try:
+                rating = card.find_element(By.XPATH, './/span[contains(@aria-label,"stars")]').get_attribute("aria-label")
+                rating = rating.split(' ')[0]
+            except:
+                rating = "-"
+            try:
+                text = card.find_element(By.XPATH, './/span[contains(@class,"wiI7pd")]').text
+            except:
+                text = "No text"
+            reviews.append((name, rating, text))
+    except:
+        pass
+    return reviews
 
-        # Wait for the side panel to appear
-        WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "div[role='complementary']"))
-        )
-
-        # Try clicking the reviews button
-        review_clicked = False
+def send_to_domo(property_name, reviews):
+    for name, rating, text in reviews:
+        payload = {
+            "Property": property_name,
+            "Reviewer": name,
+            "Rating": rating,
+            "Comment": text
+        }
         try:
-            review_button = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable(
-                    (By.XPATH, "//button[contains(translate(@aria-label,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'review')]")
-                )
-            )
-            review_button.click()
-            review_clicked = True
-        except Exception:
-            try:
-                alt_span = WebDriverWait(driver, 5).until(
-                    EC.presence_of_element_located(
-                        (By.XPATH, "//span[contains(translate(.,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'reviews')]")
-                    )
-                )
-                alt_button = alt_span.find_element(By.XPATH, "ancestor::button")
-                alt_button.click()
-                review_clicked = True
-            except Exception:
-                review_clicked = False
+            requests.post(domo_webhook, headers={"Content-Type": "application/json"}, data=json.dumps(payload))
+        except Exception as e:
+            print(f"Error sending to Domo: {e}")
 
-        if not review_clicked:
-            logging.warning(f"No reviews button found for {prop_name}.")
-            return []
+def run_scraper():
+    print("Starting Google Review Scraper...")
+    options = Options()
+    options.add_argument("--headless=new")
+    options.add_argument("--lang=en-US")
+    options.add_experimental_option("prefs", {"intl.accept_languages": "en,en_US"})
 
-        # Scroll reviews container to load more reviews
+    driver = webdriver.Chrome(options=options)
+
+    for name, url in properties.items():
+        print(f"Processing: {name}")
         try:
-            scrollable = driver.find_element(By.CSS_SELECTOR, "div[role='feed']")
-        except Exception:
-            try:
-                scrollable = driver.find_element(By.CSS_SELECTOR, "div.m6QErb.DxyBCb")
-            except Exception:
-                scrollable = None
+            driver.get(url)
+            wait_for_page(driver)
+            accept_gdpr(driver)
+            scroll_reviews(driver)
+            reviews = extract_reviews(driver)
+            send_to_domo(name, reviews)
+            print(f"✓ {len(reviews)} reviews sent for {name}")
+        except Exception as e:
+            print(f"Error scraping {name}: {e}")
+        time.sleep(2)
 
-        if scrollable:
-            for _ in range(10):
-                if len(driver.find_elements(By.CSS_SELECTOR, "div.jftiEf")) >= max_reviews:
-                    break
-                driver.execute_script(
-                    "arguments[0].scrollTop = arguments[0].scrollHeight;", scrollable
-                )
-                time.sleep(2)
-
-        # Collect reviews
-        reviews = []
-        review_cards = driver.find_elements(By.CSS_SELECTOR, "div.jftiEf")
-        if not review_cards:
-            review_cards = driver.find_elements(By.CSS_SELECTOR, "div.gws-localreviews__google-review")
-
-        for el in review_cards[:max_reviews]:
-            try:
-                author = el.find_element(By.CSS_SELECTOR, "span.d4r55").text
-            except Exception:
-                try:
-                    author = el.find_element(By.CSS_SELECTOR, "a[href*='maps/contrib']").text
-                except Exception:
-                    author = "Unknown"
-            try:
-                rating_attr = el.find_element(By.CSS_SELECTOR, "span.kvMYJc").get_attribute("aria-label")
-                rating = float(rating_attr.split(" ")[0]) if rating_attr else 0.0
-            except Exception:
-                rating = 0.0
-            try:
-                text = el.find_element(By.CSS_SELECTOR, "span.wiI7pd").text
-            except Exception:
-                try:
-                    text = el.find_element(By.CSS_SELECTOR, "span[jsname='fbQN7e']").text
-                except Exception:
-                    text = ""
-            reviews.append({
-                "property": prop_name,
-                "author": author,
-                "rating": rating,
-                "text": text,
-            })
-        return reviews
-    finally:
-        try:
-            driver.quit()
-        except Exception:
-            pass
-
-
-def run_all():
-    all_reviews = []
-    for prop in properties:
-        logging.info(f"Scraping {prop}")
-        reviews = get_reviews(prop)
-        all_reviews.extend(reviews)
-
-    if all_reviews:
-        payload = '\n'.join(json.dumps(r) for r in all_reviews)
-        res = requests.post(DOMO_WEBHOOK, data=payload.encode('utf-8'), headers={'Content-Type': 'application/json'})
-        logging.info(f"✅ Sent {len(all_reviews)} reviews to Domo | Status: {res.status_code}")
-    else:
-        logging.error("❌ No reviews found or all failed.")
+    driver.quit()
+    print("Done!")
 
 if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--once", action="store_true", help="Run scraper once")
-    args = parser.parse_args()
-
-    if args.once:
-        run_all()
+    run_scraper()
