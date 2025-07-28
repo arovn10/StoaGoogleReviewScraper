@@ -1,0 +1,5 @@
+requests
+python-dotenv
+schedule
+selenium>=4.14.0
+undetected-chromedriver
