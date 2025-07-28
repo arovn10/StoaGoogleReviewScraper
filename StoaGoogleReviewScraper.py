@@ -34,36 +34,40 @@ def wait_for_page(driver):
 
 def scroll_reviews(driver):
     try:
-        scrollable = driver.find_element(By.XPATH, '//div[contains(@class, "m6QErb DxyBCb")]')
+        scrollable = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.XPATH, '//div[contains(@class, "DxyBCb") and contains(@class, "m6QErb")]'))
+        )
         for _ in range(8):
             driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight", scrollable)
             time.sleep(2)
-    except:
-        pass
+    except Exception as e:
+        print(f"Scroll error: {e}")
 
 def extract_reviews(driver):
     reviews = []
     try:
-        container = driver.find_element(By.XPATH, '//div[contains(@class, "m6QErb DxyBCb")]')
-        cards = container.find_elements(By.XPATH, './/div[@data-review-id]')
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.XPATH, '//div[@data-review-id]'))
+        )
+        cards = driver.find_elements(By.XPATH, '//div[@data-review-id]')
         for card in cards:
             try:
-                name = card.find_element(By.XPATH, './/div[contains(@class,"d4r55")]').text
+                name = card.find_element(By.CLASS_NAME, 'd4r55').text
             except:
-                name = "No name"
+                name = "Unknown"
             try:
-                rating = card.find_element(By.XPATH, './/span[contains(@aria-label,"stars")]').get_attribute("aria-label")
-                rating = rating.split(' ')[0]
+                rating = card.find_element(By.XPATH, './/span[contains(@aria-label,"stars")]').get_attribute("aria-label").split(" ")[0]
             except:
                 rating = "-"
             try:
-                text = card.find_element(By.XPATH, './/span[contains(@class,"wiI7pd")]').text
+                text = card.find_element(By.CLASS_NAME, 'wiI7pd').text
             except:
-                text = "No text"
+                text = ""
             reviews.append((name, rating, text))
-    except:
-        pass
+    except Exception as e:
+        print(f"Extract error: {e}")
     return reviews
+
 
 def send_to_domo(property_name, reviews):
     for name, rating, text in reviews:
