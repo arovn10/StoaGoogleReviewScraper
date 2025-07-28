@@ -1,111 +1,91 @@
-import argparse
-import logging
-import time
 import json
+import time
+import logging
+import requests
+import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-import undetected_chromedriver as uc
 
 logging.basicConfig(level=logging.INFO)
 
-property_names = [
-    "The Waters at Settlers Trace",
-    "The Waters at Redstone",
-    "The Waters at Millerville",
-    "The Waters at McGowin",
-    "The Waters at Freeport",
-    "The Waters at Crestview",
-    "The Waters at Bluebonnet",
-    "The Heights at Picardy",
-    "The Flats at East Bay",
-    "The Waters at West Village",
-    "The Flats at Ransley",
-    "The Waters at Ransley",
-    "The Waters at Heritage",
+DOMO_WEBHOOK = "https://stoagroup.domo.com/api/iot/v1/webhook/data/eyJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE3NTMzOTI4MDUsInN0cmVhbSI6IjI2ODFmZjgwNDJlODRkMGU5NzI0NjAyYTYxNTE1ZmNmOm1tbW0tMDA0NC0wNTc0OjUyMzIwNTM5NSJ9.zNgtfCRVytV6_RfB17ap-zkyXOYclCfvTUpTewZTOeo"
+
+properties = [
+    "The Waters at Settlers Trace", "The Waters at Redstone", "The Waters at Millerville",
+    "The Waters at McGowin", "The Waters at Freeport", "The Waters at Crestview",
+    "The Waters at Bluebonnet", "The Heights at Picardy", "The Flats at East Bay",
+    "The Waters at West Village", "The Flats at Ransley", "The Waters at Ransley",
+    "The Waters at Heritage", "The Waters at Hammond"
 ]
 
-def get_google_reviews(property_name):
-    logging.info(f"Scraping {property_name}")
-    
+def get_reviews(prop_name, max_reviews=5):
     options = uc.ChromeOptions()
-    options.add_argument("--headless")
+    options.headless = True
     options.add_argument("--no-sandbox")
-    options.add_argument("--disable-gpu")
     options.add_argument("--disable-dev-shm-usage")
-    
+    options.add_argument("--window-size=1920,1080")
+
     driver = uc.Chrome(options=options)
-    wait = WebDriverWait(driver, 10)
+    driver.get("https://www.google.com/maps")
+    time.sleep(2)
+
+    search_box = driver.find_element(By.ID, "searchboxinput")
+    search_box.send_keys(prop_name)
+    search_box.send_keys(Keys.ENTER)
+    time.sleep(5)
 
     try:
-        # Navigate to Google
-        driver.get("https://www.google.com/")
-        time.sleep(1)
-
-        # Accept cookies if prompted
-        try:
-            agree = driver.find_element(By.XPATH, "//button[.='Accept all']")
-            agree.click()
-        except:
-            pass
-
-        # Search the property name
-        search_box = driver.find_element(By.NAME, "q")
-        search_box.clear()
-        search_box.send_keys(property_name)
-        search_box.send_keys(Keys.RETURN)
-
-        # Click on the review button in the knowledge panel
-        try:
-            reviews_button = wait.until(EC.element_to_be_clickable(
-                (By.XPATH, "//button[contains(@aria-label, ' reviews')]")
-            ))
-            reviews_button.click()
-        except:
-            logging.warning(f"No reviews button found for {property_name}")
-            return {"property": property_name, "reviews": []}
-
-        # Wait for reviews section to load
-        wait.until(EC.presence_of_element_located((By.CLASS_NAME, "jftiEf")))
-
-        # Scroll reviews container
-        scrollable_div = wait.until(
-            EC.presence_of_element_located((By.XPATH, '//div[@role="main"]//div[contains(@class, "m6QErb")]'))
-        )
-
-        for _ in range(5):
-            driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight", scrollable_div)
-            time.sleep(2)
-
-        # Collect review text
-        reviews = driver.find_elements(By.CLASS_NAME, "wiI7pd")
-        review_texts = [r.text for r in reviews if r.text.strip()]
-
-        return {"property": property_name, "reviews": review_texts}
-
+        # Wait for the panel to load
+        panel = driver.find_element(By.CLASS_NAME, "m6QErb")
+        review_buttons = panel.find_elements(By.TAG_NAME, "button")
+        for btn in review_buttons:
+            if "review" in btn.get_attribute("aria-label").lower():
+                btn.click()
+                time.sleep(3)
+                break
     except Exception as e:
-        logging.warning(f"No reviews section found for {property_name}: {e}")
-        return {"property": property_name, "reviews": []}
-
-    finally:
+        logging.warning(f"No reviews section found for {prop_name}: {e}")
         driver.quit()
+        return []
 
-def scrape_all():
-    results = []
-    for name in property_names:
-        result = get_google_reviews(name)
-        results.append(result)
-    return results
+    reviews = []
+    review_cards = driver.find_elements(By.CLASS_NAME, "jftiEf")[:max_reviews]
+    for el in review_cards:
+        try:
+            author = el.find_element(By.CLASS_NAME, "d4r55").text
+            rating = float(el.find_element(By.CLASS_NAME, "kvMYJc").get_attribute("aria-label").split(" ")[0])
+            text = el.find_element(By.CLASS_NAME, "wiI7pd").text
+            reviews.append({
+                "property": prop_name,
+                "author": author,
+                "rating": rating,
+                "text": text
+            })
+        except Exception:
+            continue
+
+    driver.quit()
+    return reviews
+
+def run_all():
+    all_reviews = []
+    for prop in properties:
+        logging.info(f"Scraping {prop}")
+        reviews = get_reviews(prop)
+        all_reviews.extend(reviews)
+
+    if all_reviews:
+        payload = '\n'.join(json.dumps(r) for r in all_reviews)
+        res = requests.post(DOMO_WEBHOOK, data=payload.encode('utf-8'), headers={'Content-Type': 'application/json'})
+        logging.info(f"✅ Sent {len(all_reviews)} reviews to Domo | Status: {res.status_code}")
+    else:
+        logging.error("❌ No reviews found or all failed.")
 
 if __name__ == "__main__":
+    import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--once", action="store_true", help="Run scraper once immediately")
+    parser.add_argument("--once", action="store_true", help="Run scraper once")
     args = parser.parse_args()
 
     if args.once:
-        scraped = scrape_all()
-        with open("reviews_output.json", "w", encoding="utf-8") as f:
-            json.dump(scraped, f, indent=2, ensure_ascii=False)
-        print("✅ Scraping complete. Results saved to reviews_output.json")
+        run_all()
