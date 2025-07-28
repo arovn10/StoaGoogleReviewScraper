@@ -18,55 +18,115 @@ properties = [
     "The Waters at Heritage", "The Waters at Hammond"
 ]
 
-def get_reviews(prop_name, max_reviews=5):
+ddef get_reviews(prop_name: str, max_reviews: int = 5) -> list[dict]:
+    """Scrape reviews from Google Maps for a given property name."""
     options = uc.ChromeOptions()
-    options.headless = True
+    options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1920,1080")
 
     driver = uc.Chrome(options=options)
-    driver.get("https://www.google.com/maps")
-    time.sleep(2)
-
-    search_box = driver.find_element(By.ID, "searchboxinput")
-    search_box.send_keys(prop_name)
-    search_box.send_keys(Keys.ENTER)
-    time.sleep(5)
-
     try:
-        # Wait for the panel to load
-        panel = driver.find_element(By.CLASS_NAME, "m6QErb")
-        review_buttons = panel.find_elements(By.TAG_NAME, "button")
-        for btn in review_buttons:
-            if "review" in btn.get_attribute("aria-label").lower():
-                btn.click()
-                time.sleep(3)
-                break
-    except Exception as e:
-        logging.warning(f"No reviews section found for {prop_name}: {e}")
-        driver.quit()
-        return []
+        driver.get("https://www.google.com/maps")
 
-    reviews = []
-    review_cards = driver.find_elements(By.CLASS_NAME, "jftiEf")[:max_reviews]
-    for el in review_cards:
+        # Wait for the search box and search for the property
+        search_box = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.ID, "searchboxinput"))
+        )
+        search_box.clear()
+        search_box.send_keys(prop_name)
+        search_box.send_keys(Keys.ENTER)
+
+        # Wait for the side panel to appear
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "div[role='complementary']"))
+        )
+
+        # Try clicking the reviews button
+        review_clicked = False
         try:
-            author = el.find_element(By.CLASS_NAME, "d4r55").text
-            rating = float(el.find_element(By.CLASS_NAME, "kvMYJc").get_attribute("aria-label").split(" ")[0])
-            text = el.find_element(By.CLASS_NAME, "wiI7pd").text
+            review_button = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable(
+                    (By.XPATH, "//button[contains(translate(@aria-label,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'review')]")
+                )
+            )
+            review_button.click()
+            review_clicked = True
+        except Exception:
+            try:
+                alt_span = WebDriverWait(driver, 5).until(
+                    EC.presence_of_element_located(
+                        (By.XPATH, "//span[contains(translate(.,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'reviews')]")
+                    )
+                )
+                alt_button = alt_span.find_element(By.XPATH, "ancestor::button")
+                alt_button.click()
+                review_clicked = True
+            except Exception:
+                review_clicked = False
+
+        if not review_clicked:
+            logging.warning(f"No reviews button found for {prop_name}.")
+            return []
+
+        # Scroll reviews container to load more reviews
+        try:
+            scrollable = driver.find_element(By.CSS_SELECTOR, "div[role='feed']")
+        except Exception:
+            try:
+                scrollable = driver.find_element(By.CSS_SELECTOR, "div.m6QErb.DxyBCb")
+            except Exception:
+                scrollable = None
+
+        if scrollable:
+            for _ in range(10):
+                if len(driver.find_elements(By.CSS_SELECTOR, "div.jftiEf")) >= max_reviews:
+                    break
+                driver.execute_script(
+                    "arguments[0].scrollTop = arguments[0].scrollHeight;", scrollable
+                )
+                time.sleep(2)
+
+        # Collect reviews
+        reviews = []
+        review_cards = driver.find_elements(By.CSS_SELECTOR, "div.jftiEf")
+        if not review_cards:
+            review_cards = driver.find_elements(By.CSS_SELECTOR, "div.gws-localreviews__google-review")
+
+        for el in review_cards[:max_reviews]:
+            try:
+                author = el.find_element(By.CSS_SELECTOR, "span.d4r55").text
+            except Exception:
+                try:
+                    author = el.find_element(By.CSS_SELECTOR, "a[href*='maps/contrib']").text
+                except Exception:
+                    author = "Unknown"
+            try:
+                rating_attr = el.find_element(By.CSS_SELECTOR, "span.kvMYJc").get_attribute("aria-label")
+                rating = float(rating_attr.split(" ")[0]) if rating_attr else 0.0
+            except Exception:
+                rating = 0.0
+            try:
+                text = el.find_element(By.CSS_SELECTOR, "span.wiI7pd").text
+            except Exception:
+                try:
+                    text = el.find_element(By.CSS_SELECTOR, "span[jsname='fbQN7e']").text
+                except Exception:
+                    text = ""
             reviews.append({
                 "property": prop_name,
                 "author": author,
                 "rating": rating,
-                "text": text
+                "text": text,
             })
+        return reviews
+    finally:
+        try:
+            driver.quit()
         except Exception:
-            continue
+            pass
 
-    
-    driver.quit()
-    return reviews
 
 def run_all():
     all_reviews = []
