@@ -1,0 +1,57 @@
+[
+  {
+    "timestamp": "2025-07-28T17:09:26.768622",
+    "status": "success",
+    "status_code": 200,
+    "data": {
+      "Property": "TEST - The Waters at Bluebonnet",
+      "Reviewer": "John Smith",
+      "Rating": "5",
+      "Comment": "Excellent place to live! Great amenities and friendly staff."
+    }
+  },
+  {
+    "timestamp": "2025-07-28T17:09:27.914782",
+    "status": "success",
+    "status_code": 200,
+    "data": {
+      "Property": "TEST - The Heights at Picardy",
+      "Reviewer": "Sarah Johnson",
+      "Rating": "4",
+      "Comment": "Nice apartments with good location. Would recommend."
+    }
+  },
+  {
+    "timestamp": "2025-07-28T17:09:29.069127",
+    "status": "success",
+    "status_code": 200,
+    "data": {
+      "Property": "TEST - The Waters at West Village",
+      "Reviewer": "Mike Davis",
+      "Rating": "5",
+      "Comment": "Absolutely love living here. Maintenance team is very responsive."
+    }
+  },
+  {
+    "timestamp": "2025-07-28T17:09:30.218725",
+    "status": "success",
+    "status_code": 200,
+    "data": {
+      "Property": "TEST - The Flats at East Bay",
+      "Reviewer": "Emily Wilson",
+      "Rating": "4",
+      "Comment": "Good value for money. Clean and well-maintained property."
+    }
+  },
+  {
+    "timestamp": "2025-07-28T17:09:31.389833",
+    "status": "success",
+    "status_code": 200,
+    "data": {
+      "Property": "TEST - The Waters at Hammond",
+      "Reviewer": "David Brown",
+      "Rating": "5",
+      "Comment": "Best apartment complex I've lived in. Highly recommend!"
+    }
+  }
+]

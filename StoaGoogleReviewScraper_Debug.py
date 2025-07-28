@@ -115,7 +115,11 @@ def scroll_reviews_section(driver):
             "//div[contains(@class, 'm6QErb')]",
             "//div[contains(@class, 'DxyBCb')]",
             "//div[@role='main']//div[contains(@class, 'scrollable')]",
-            "//div[contains(@class, 'review-dialog-list')]"
+            "//div[contains(@class, 'review-dialog-list')]",
+            "//div[contains(@class, 'review-dialog')]",
+            "//div[contains(@class, 'reviews')]",
+            "//div[@role='main']",
+            "//div[contains(@class, 'scrollable')]"
         ]
         
         scrollable_container = None
@@ -124,6 +128,7 @@ def scroll_reviews_section(driver):
                 scrollable_container = WebDriverWait(driver, 5).until(
                     EC.presence_of_element_located((By.XPATH, selector))
                 )
+                print(f"Found scrollable container with selector: {selector}")
                 break
             except TimeoutException:
                 continue
@@ -262,7 +267,6 @@ def extract_reviews_data(driver):
         print(f"Error extracting reviews: {e}")
         return reviews
 
-
 def send_to_domo(property_name, reviews):
     """Send reviews to Domo webhook"""
     success_count = 0
@@ -299,10 +303,11 @@ def send_to_domo(property_name, reviews):
     
     return success_count, error_count
 
-def run_scraper():
-    print("Starting Google Review Scraper...")
+def run_scraper_debug():
+    print("Starting Google Review Scraper (DEBUG MODE - Browser will be visible)...")
     options = Options()
-    options.add_argument("--headless=new")
+    # Remove headless mode for debugging
+    # options.add_argument("--headless=new")
     options.add_argument("--lang=en-US")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
@@ -314,47 +319,56 @@ def run_scraper():
     driver = webdriver.Chrome(options=options)
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
-    for name, url in properties.items():
-        print(f"\nProcessing: {name}")
-        try:
-            # Navigate to the property page
-            driver.get(url)
+    # Process only first property for debugging
+    name, url = list(properties.items())[0]
+    print(f"\nProcessing: {name}")
+    print(f"URL: {url}")
+    
+    try:
+        # Navigate to the property page
+        driver.get(url)
+        wait_for_page_load(driver)
+        
+        # Handle consent popup if present
+        handle_consent_popup(driver)
+        
+        # Try to click on reviews tab
+        if not click_reviews_tab(driver):
+            print(f"Could not find reviews tab for {name}, trying alternative approach...")
+            # Try to navigate directly to reviews URL
+            reviews_url = url.replace("!5e0", "!5e0!3m1!1e1")
+            driver.get(reviews_url)
             wait_for_page_load(driver)
-            
-            # Handle consent popup if present
             handle_consent_popup(driver)
+        
+        # Scroll to load more reviews
+        scroll_reviews_section(driver)
+        
+        # Extract reviews
+        reviews = extract_reviews_data(driver)
+        
+        if reviews:
+            print(f"Found {len(reviews)} reviews:")
+            for i, (name, rating, text) in enumerate(reviews[:5], 1):  # Show first 5 reviews
+                print(f"  {i}. {name} - {rating} stars: {text[:100]}...")
             
-            # Try to click on reviews tab
-            if not click_reviews_tab(driver):
-                print(f"Could not find reviews tab for {name}, trying alternative approach...")
-                # Try to navigate directly to reviews URL
-                reviews_url = url.replace("!5e0", "!5e0!3m1!1e1")
-                driver.get(reviews_url)
-                wait_for_page_load(driver)
-                handle_consent_popup(driver)
-            
-            # Scroll to load more reviews
-            scroll_reviews_section(driver)
-            
-            # Extract reviews
-            reviews = extract_reviews_data(driver)
-            
-            if reviews:
+            # Ask user if they want to send to Domo
+            response = input("\nDo you want to send these reviews to Domo? (y/n): ")
+            if response.lower() == 'y':
                 success_count, error_count = send_to_domo(name, reviews)
                 print(f"✓ {success_count} reviews successfully sent for {name}")
                 if error_count > 0:
                     print(f"⚠ {error_count} reviews failed to send for {name}")
-            else:
-                print(f"⚠ No reviews found for {name}")
-                
-        except Exception as e:
-            print(f"❌ Error scraping {name}: {e}")
-        
-        # Random delay between properties
-        time.sleep(random.uniform(3, 5))
-
+        else:
+            print(f"⚠ No reviews found for {name}")
+            
+    except Exception as e:
+        print(f"❌ Error scraping {name}: {e}")
+    
+    # Keep browser open for inspection
+    input("\nPress Enter to close the browser...")
     driver.quit()
     print("\nDone!")
 
 if __name__ == "__main__":
-    run_scraper()
+    run_scraper_debug()
