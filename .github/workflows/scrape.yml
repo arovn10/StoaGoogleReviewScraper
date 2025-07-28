@@ -20,4 +20,4 @@ jobs:
       - name: Run scraper
         env:
           DOMO_WEBHOOK_URL: ${{ secrets.DOMO_WEBHOOK_URL }}
-        run: ppython StoaGoogleReviewScraper.py --once
+        run: python StoaGoogleReviewScraper.py --once
