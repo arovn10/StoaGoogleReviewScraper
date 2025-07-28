@@ -22,6 +22,8 @@ import requests
 from dotenv import load_dotenv
 import schedule
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 import undetected_chromedriver as uc
 
 # Configure basic logging
@@ -31,12 +33,10 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 
-
 def load_environment() -> None:
     """Load environment variables from a `.env` file if present."""
     if os.path.exists(".env"):
         load_dotenv()
-
 
 # List of Stoa Group properties to scrape.  Adjust this list as new
 # properties are added.
@@ -56,7 +56,6 @@ PROPERTIES: List[str] = [
     "The Waters at Heritage",
     "The Waters at Hammond",
 ]
-
 
 def scrape_property_reviews(property_name: str, max_reviews: int = 5) -> List[Dict[str, object]]:
     """Scrape up to `max_reviews` public reviews for the given property.
@@ -87,33 +86,72 @@ def scrape_property_reviews(property_name: str, max_reviews: int = 5) -> List[Di
     except Exception as exc:
         logging.error("Failed to launch Chrome for %s: %s", property_name, exc)
         return reviews
+
     try:
         driver.get("https://www.google.com/maps")
-        time.sleep(2)
-        search_box = driver.find_element(By.ID, "searchboxinput")
+        wait = WebDriverWait(driver, 20)
+        # Find search box and submit property name
+        search_box = wait.until(EC.presence_of_element_located((By.ID, "searchboxinput")))
         search_box.clear()
         search_box.send_keys(property_name)
         search_box.submit()
-        time.sleep(4)
+
+        # Click the first search result to open details panel
         try:
-            reviews_button = driver.find_element(By.XPATH, "//button[contains(@aria-label, ' reviews')]")
+            first_result = wait.until(
+                EC.element_to_be_clickable(
+                    (
+                        By.XPATH,
+                        "(//div[@role='article']//a[contains(@href,'/maps/place')])[1]"
+                    )
+                )
+            )
+            first_result.click()
+        except Exception:
+            logging.warning("No search results found for %s", property_name)
+            return reviews
+
+        # Wait for the place details header to appear
+        try:
+            wait.until(EC.presence_of_element_located((By.XPATH, "//h1")))
+        except Exception:
+            logging.warning("Place details did not load for %s", property_name)
+            return reviews
+
+        # Click the reviews button
+        try:
+            reviews_button = wait.until(
+                EC.element_to_be_clickable(
+                    (By.XPATH, "//button[contains(@aria-label, ' reviews')]")
+                )
+            )
             reviews_button.click()
-            time.sleep(3)
         except Exception:
             logging.warning("No reviews section found for %s", property_name)
             return reviews
+
+        # Wait for review elements to load
+        try:
+            wait.until(EC.presence_of_all_elements_located((By.CLASS_NAME, "jftiEf")))
+        except Exception:
+            logging.warning("Review elements did not load for %s", property_name)
+            return reviews
+
         review_elements = driver.find_elements(By.CLASS_NAME, "jftiEf")[:max_reviews]
         for el in review_elements:
             try:
                 author = el.find_element(By.CLASS_NAME, "d4r55").text
-                rating_str = el.find_element(By.CLASS_NAME, "kvMYJc").get_attribute("aria-label")
-                rating = None
-                if rating_str:
-                    try:
-                        rating = float(rating_str.split(" ")[0])
-                    except Exception:
-                        rating = None
-                text = el.find_element(By.CLASS_NAME, "wiI7pd").text
+                rating: float | None = None
+                rating_elem = el.find_element(By.CLASS_NAME, "kvMYJc")
+                if rating_elem:
+                    rating_str = rating_elem.get_attribute("aria-label")
+                    if rating_str:
+                        try:
+                            rating = float(rating_str.split(" ")[0])
+                        except Exception:
+                            rating = None
+                text_elem = el.find_element(By.CLASS_NAME, "wiI7pd")
+                text = text_elem.text if text_elem else ""
                 reviews.append(
                     {
                         "property": property_name,
@@ -129,6 +167,14 @@ def scrape_property_reviews(property_name: str, max_reviews: int = 5) -> List[Di
         driver.quit()
     return reviews
 
+def scrape_all(properties: List[str], max_reviews: int = 5) -> List[Dict[str, object]]:
+    """Scrape reviews for all properties and return a combined list."""
+    all_reviews: List[Dict[str, object]] = []
+    for prop in properties:
+        logging.info("Scraping %s", prop)
+        reviews = scrape_property_reviews(prop, max_reviews)
+        all_reviews.extend(reviews)
+    return all_reviews
 
 def send_to_domo(payload: List[Dict[str, object]], webhook_url: str) -> None:
     """POST the JSON payload to the configured Domo webhook.
@@ -140,69 +186,63 @@ def send_to_domo(payload: List[Dict[str, object]], webhook_url: str) -> None:
     try:
         headers = {"Content-Type": "application/json"}
         payload_lines = "\n".join(json.dumps(r) for r in payload)
-        resp = requests.post(webhook_url, data=payload_lines.encode("utf-8"), headers=headers, timeout=30)
+        resp = requests.post(
+            webhook_url, data=payload_lines.encode("utf-8"), headers=headers, timeout=30
+        )
         resp.raise_for_status()
         logging.info(
-            "Sent %d reviews to Domo successfully (status %s)", len(payload), resp.status_code
+            "Sent %d reviews to Domo successfully (status %s)",
+            len(payload),
+            resp.status_code,
         )
     except Exception as exc:
         logging.error("Failed to send payload to Domo: %s", exc)
 
-
-def scrape_all() -> List[Dict[str, object]]:
-    """Iterate through all properties and collect their scraped reviews.
-
-    Returns:
-        Combined list of reviews for all properties.
-    """
-    all_reviews: List[Dict[str, object]] = []
-    for property_name in PROPERTIES:
-        logging.info("Scraping %s", property_name)
-        prop_reviews = scrape_property_reviews(property_name, max_reviews=5)
-        all_reviews.extend(prop_reviews)
-    return all_reviews
-
-
-def scrape_and_send(webhook_url: str) -> None:
-    """Scrape reviews for all properties and send them to Domo."""
-    reviews = scrape_all()
-    if not reviews:
-        logging.warning("No reviews fetched; skipping webhook send")
-        return
-    send_to_domo(reviews, webhook_url)
-
+def scrape_and_send(properties: List[str], webhook_url: str, max_reviews: int = 5) -> None:
+    """Scrape reviews and send them to Domo if any are found."""
+    reviews = scrape_all(properties, max_reviews)
+    if reviews:
+        send_to_domo(reviews, webhook_url)
+    else:
+        logging.warning("No reviews found for any properties.")
 
 def run_weekly(webhook_url: str) -> None:
-    """Schedule the scraping job to run every week indefinitely."""
-    schedule.every(7).days.do(scrape_and_send, webhook_url=webhook_url)
-    logging.info("Scheduled weekly scraping job; awaiting first run")
+    """Schedule the scraping job to run every week."""
+    schedule.every(7).days.do(scrape_and_send, PROPERTIES, webhook_url)
+    logging.info("Scheduled weekly scraping job.")
     while True:
         schedule.run_pending()
         time.sleep(3600)
 
-
 def parse_args(argv: List[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Scrape Google reviews for Stoa Group properties.")
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(description="Stoa Google Reviews scraper.")
     parser.add_argument(
         "--once",
         action="store_true",
-        help="Run the scraper once and exit instead of scheduling weekly.",
+        help="Run the scraper once and exit instead of weekly.",
+    )
+    parser.add_argument(
+        "--max-reviews",
+        type=int,
+        default=5,
+        help="Maximum number of reviews to scrape per property.",
     )
     return parser.parse_args(argv)
 
-
 def main(argv: List[str]) -> None:
     load_environment()
-    args = parse_args(argv)
+    args = parse_args(argv[1:])
     webhook_url = os.environ.get("DOMO_WEBHOOK_URL")
     if not webhook_url:
-        logging.error("Environment variable DOMO_WEBHOOK_URL is not set; exiting.")
+        logging.error(
+            "Environment variable DOMO_WEBHOOK_URL is not set. Cannot post results."
+        )
         sys.exit(1)
     if args.once:
-        scrape_and_send(webhook_url)
+        scrape_and_send(PROPERTIES, webhook_url, args.max_reviews)
     else:
         run_weekly(webhook_url)
 
-
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    main(sys.argv)
