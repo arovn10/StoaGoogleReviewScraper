@@ -885,6 +885,75 @@ class WorkingAutoScraper:
         print(f"💾 JSON exported to: {filename} ({len(flattened_reviews)} reviews)")
         return filename
 
+    def save_json_to_folder(self, all_property_reviews: Dict[str, List[Dict[str, Any]]]) -> str:
+        """Save review data to JSON file in the organized outputs folder."""
+        try:
+            # Create outputs directory if it doesn't exist
+            import os
+            outputs_dir = "data/outputs"
+            os.makedirs(outputs_dir, exist_ok=True)
+            
+            # Generate descriptive filename with timestamp and summary
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            total_properties = len(all_property_reviews)
+            total_reviews = sum(len(reviews) for reviews in all_property_reviews.values())
+            
+            # Create a descriptive filename
+            filename = f"google_reviews_{timestamp}_p{total_properties}_r{total_reviews}.json"
+            filepath = os.path.join(outputs_dir, filename)
+            
+            # Prepare data for JSON export (include metadata)
+            export_data = {
+                "metadata": {
+                    "scraper_version": "working_auto_scraper_v1.0",
+                    "scraped_at": datetime.now().isoformat(),
+                    "total_properties": total_properties,
+                    "total_reviews": total_reviews,
+                    "properties_processed": list(all_property_reviews.keys())
+                },
+                "reviews": all_property_reviews
+            }
+            
+            # Save to JSON file
+            with open(filepath, 'w', encoding='utf-8') as jsonfile:
+                json.dump(export_data, jsonfile, indent=2, ensure_ascii=False)
+            
+            print(f"💾 JSON saved to: {filepath}")
+            print(f"📊 File contains: {total_properties} properties, {total_reviews} reviews")
+            
+            # Also create a summary file
+            summary_filename = f"summary_{timestamp}_p{total_properties}_r{total_reviews}.json"
+            summary_filepath = os.path.join(outputs_dir, summary_filename)
+            
+            summary_data = {
+                "scraping_summary": {
+                    "timestamp": datetime.now().isoformat(),
+                    "scraper_version": "working_auto_scraper_v1.0",
+                    "total_properties": total_properties,
+                    "total_reviews": total_reviews,
+                    "properties": {}
+                }
+            }
+            
+            # Add property summaries
+            for property_name, reviews in all_property_reviews.items():
+                summary_data["scraping_summary"]["properties"][property_name] = {
+                    "review_count": len(reviews),
+                    "last_scraped": datetime.now().isoformat(),
+                    "sample_reviews": reviews[:3] if reviews else []  # First 3 reviews as sample
+                }
+            
+            with open(summary_filepath, 'w', encoding='utf-8') as summaryfile:
+                json.dump(summary_data, summaryfile, indent=2, ensure_ascii=False)
+            
+            print(f"📋 Summary saved to: {summary_filepath}")
+            
+            return filepath
+            
+        except Exception as e:
+            print(f"❌ Error saving JSON to folder: {str(e)}")
+            return ""
+
     def push_to_domo(self, all_property_reviews: Dict[str, List[Dict[str, Any]]], max_retries: int = 3):
         """Push review data to Domo webhook with flattened structure - one row per review."""
         try:
@@ -962,7 +1031,7 @@ class WorkingAutoScraper:
         """Send a single batch of reviews to Domo with retry logic."""
         for attempt in range(max_retries):
             try:
-                print(f"   🔄 Attempt {attempt + 1}/{max_retries}...")
+                print(f"   �� Attempt {attempt + 1}/{max_retries}...")
                 
                 response = requests.post(
                     self.DOMO_WEBHOOK_URL,
@@ -1023,28 +1092,40 @@ def main():
         all_property_reviews = scraper.scrape_all_properties()
         
         if all_property_reviews:
-            print(f"\n🎉 Scraping completed successfully!")
+            print(f"\n🎉 Multi-property scraping completed successfully!")
             
             total_reviews = 0
             for property_name, reviews in all_property_reviews.items():
                 print(f"📊 {property_name}: {len(reviews)} reviews")
                 total_reviews += len(reviews)
             
-            print(f"📊 Total reviews: {total_reviews}")
+            print(f"📊 Total reviews across all properties: {total_reviews}")
             
-            # Export results
-            json_file = scraper.export_to_json(all_property_reviews)
-            print(f"💾 Results saved to: {json_file}")
+            # Save JSON to organized folder
+            print("\n💾 Saving data to organized JSON files...")
+            json_filepath = scraper.save_json_to_folder(all_property_reviews)
             
-            # Push data to Domo (unless disabled)
-            if not args.no_domo:
-                print(f"\n🔗 Pushing data to Domo...")
-                if scraper.push_to_domo(all_property_reviews):
-                    print(f"✅ Domo integration completed successfully!")
-                else:
-                    print(f"⚠️ Domo integration had issues, but local file was saved")
+            if json_filepath:
+                print(f"✅ JSON data saved successfully to: {json_filepath}")
             else:
-                print(f"\n⏭️ Skipping Domo integration (--no-domo flag used)")
+                print("⚠️ Failed to save JSON data")
+            
+            # Push to Domo (unless disabled)
+            if not args.no_domo:
+                print("\n🔗 Pushing data to Domo...")
+                domo_success = scraper.push_to_domo(all_property_reviews)
+                if domo_success:
+                    print("✅ Data successfully pushed to Domo!")
+                else:
+                    print("❌ Failed to push data to Domo")
+            else:
+                print("⏭️ Skipping Domo push (--no-domo flag used)")
+            
+            print(f"\n🎯 Summary:")
+            print(f"   📁 JSON files saved to: data/outputs/")
+            print(f"   📊 Total properties: {len(all_property_reviews)}")
+            print(f"   📝 Total reviews: {total_reviews}")
+            print(f"   🔗 Domo integration: {'Enabled' if not args.no_domo else 'Disabled'}")
         else:
             print("❌ No reviews found for any property.")
             

@@ -75,6 +75,60 @@ The scraper will generate:
 - `working_auto_scraper_YYYYMMDD_HHMMSS.json` - Review data
 - Console output showing progress
 
+## 📁 Output Management
+
+The scraper automatically organizes all JSON outputs in the `data/outputs/` folder with descriptive naming.
+
+### 🏷️ File Naming Convention
+
+**Main Review Files:**
+```
+google_reviews_YYYYMMDD_HHMMSS_pX_rY.json
+```
+
+**Summary Files:**
+```
+summary_YYYYMMDD_HHMMSS_pX_rY.json
+```
+
+**Example:** `google_reviews_20250120_143052_p9_r407.json`
+- `20250120` = Date (January 20, 2025)
+- `143052` = Time (2:30:52 PM)  
+- `p9` = 9 properties processed
+- `r407` = 407 total reviews collected
+
+### 🛠️ Output Management Utility
+
+Use the `manage_outputs.py` script to manage your output files:
+
+```bash
+# List all output files
+python manage_outputs.py list
+
+# Get detailed info about a specific file
+python manage_outputs.py info --file google_reviews_20250120_143052_p9_r407.json
+
+# Clean up files older than 30 days
+python manage_outputs.py cleanup --days 30
+
+# Clean up files older than 7 days
+python manage_outputs.py cleanup --days 7
+```
+
+### 📊 What Gets Saved
+
+1. **Full Review Data**: Complete review dataset with metadata
+2. **Summary Files**: Quick overview with property breakdowns
+3. **Automatic Organization**: Files sorted by timestamp and content
+4. **Dual Output**: Both local JSON files AND Domo webhook
+
+### 🔄 File Lifecycle
+
+1. **Scraping completes** → Data saved to organized JSON files
+2. **Domo push** → Data sent to webhook (flattened structure)
+3. **Local storage** → JSON files kept for backup and analysis
+4. **Management** → Use utility script to clean up old files
+
 ## 🔧 Troubleshooting
 
 ### Chrome Not Found
