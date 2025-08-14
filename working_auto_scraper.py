@@ -67,13 +67,38 @@ class WorkingAutoScraper:
         ]
         
     def setup_driver(self):
-        """Setup Chrome WebDriver."""
+        """Setup Chrome WebDriver with appropriate options for Codespaces."""
+        try:
+            # Try Chrome first
+            if self._try_chrome_setup():
+                return
+            
+            # Fallback to Firefox if Chrome fails
+            print("🔄 Chrome setup failed, trying Firefox...")
+            if self._try_firefox_setup():
+                return
+            
+            # Last resort: try to install Chrome
+            print("🔄 Attempting to install Chrome...")
+            self._install_chrome_if_needed()
+            if self._try_chrome_setup():
+                return
+            
+            raise Exception("Could not set up any WebDriver (Chrome or Firefox)")
+            
+        except Exception as e:
+            print(f"❌ Error setting up WebDriver: {str(e)}")
+            raise
+    
+    def _try_chrome_setup(self):
+        """Try to set up Chrome WebDriver."""
         try:
             chrome_options = Options()
             
             if self.headless:
                 chrome_options.add_argument("--headless")
             
+            # Add various options for better scraping in Codespaces
             chrome_options.add_argument("--no-sandbox")
             chrome_options.add_argument("--disable-dev-shm-usage")
             chrome_options.add_argument("--disable-gpu")
@@ -82,19 +107,102 @@ class WorkingAutoScraper:
             chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
             chrome_options.add_experimental_option('useAutomationExtension', False)
             
+            # Additional options for Codespaces/Linux
+            chrome_options.add_argument("--disable-extensions")
+            chrome_options.add_argument("--disable-plugins")
+            chrome_options.add_argument("--disable-images")
+            chrome_options.add_argument("--disable-javascript")
+            chrome_options.add_argument("--disable-web-security")
+            chrome_options.add_argument("--allow-running-insecure-content")
+            
+            # Set user agent
             ua = UserAgent()
             chrome_options.add_argument(f'--user-agent={ua.random}')
             
+            # Setup service and driver
             service = Service(ChromeDriverManager().install())
             self.driver = webdriver.Chrome(service=service, options=chrome_options)
             
+            # Execute script to remove webdriver property
             self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
             
-            print("✅ WebDriver setup completed successfully")
+            print("✅ Chrome WebDriver setup completed successfully")
+            return True
             
         except Exception as e:
-            print(f"❌ Error setting up WebDriver: {str(e)}")
-            raise
+            print(f"⚠️ Chrome setup failed: {str(e)}")
+            return False
+    
+    def _try_firefox_setup(self):
+        """Try to set up Firefox WebDriver as fallback."""
+        try:
+            from selenium.webdriver.firefox.options import Options as FirefoxOptions
+            from selenium.webdriver.firefox.service import Service as FirefoxService
+            from webdriver_manager.firefox import GeckoDriverManager
+            
+            firefox_options = FirefoxOptions()
+            
+            if self.headless:
+                firefox_options.add_argument("--headless")
+            
+            # Firefox options for Codespaces
+            firefox_options.add_argument("--no-sandbox")
+            firefox_options.add_argument("--disable-dev-shm-usage")
+            firefox_options.add_argument("--width=1920")
+            firefox_options.add_argument("--height=1080")
+            
+            # Setup service and driver
+            service = FirefoxService(GeckoDriverManager().install())
+            self.driver = webdriver.Firefox(service=service, options=firefox_options)
+            
+            print("✅ Firefox WebDriver setup completed successfully")
+            return True
+            
+        except Exception as e:
+            print(f"⚠️ Firefox setup failed: {str(e)}")
+            return False
+    
+    def _install_chrome_if_needed(self):
+        """Install Chrome in Codespaces if not already installed."""
+        try:
+            import subprocess
+            import os
+            
+            # Check if Chrome is already installed
+            try:
+                subprocess.run(['google-chrome', '--version'], capture_output=True, check=True)
+                print("✅ Chrome is already installed")
+                return
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                pass
+            
+            print("🔄 Installing Chrome in Codespaces...")
+            
+            # Update package list
+            subprocess.run(['sudo', 'apt-get', 'update'], check=True)
+            
+            # Install Chrome dependencies
+            subprocess.run(['sudo', 'apt-get', 'install', '-y', 'wget', 'gnupg2'], check=True)
+            
+            # Add Google Chrome repository
+            subprocess.run(['wget', '-q', '-O', '-', 'https://dl.google.com/linux/linux_signing_key.pub'], 
+                         stdout=subprocess.PIPE, check=True)
+            
+            # Download and install Chrome
+            subprocess.run(['wget', 'https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb'], check=True)
+            subprocess.run(['sudo', 'dpkg', '-i', 'google-chrome-stable_current_amd64.deb'], check=True)
+            
+            # Fix any dependency issues
+            subprocess.run(['sudo', 'apt-get', 'install', '-f', '-y'], check=True)
+            
+            # Clean up
+            subprocess.run(['rm', 'google-chrome-stable_current_amd64.deb'], check=True)
+            
+            print("✅ Chrome installed successfully")
+            
+        except Exception as e:
+            print(f"⚠️ Warning: Could not install Chrome automatically: {str(e)}")
+            print("💡 You may need to install Chrome manually or use a different approach")
 
     def scrape_all_properties(self) -> Dict[str, List[Dict[str, Any]]]:
         """Scrape reviews for all properties."""
