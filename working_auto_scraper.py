@@ -715,7 +715,7 @@ class WorkingAutoScraper:
         initial_review_count = 0
         found_reviews = False
         consecutive_no_change = 0
-        max_consecutive_no_change = 8  # Allow more consecutive no-change before stopping
+        max_consecutive_no_change = 4  # Decreased from 8 to 4 for faster termination
         
         print("🚀 Auto-scrolling to the bottom (Phase 1: Loading only, no extraction)...")
         
@@ -742,16 +742,16 @@ class WorkingAutoScraper:
                 else:
                     same_count_streak += 1
                     consecutive_no_change += 1
-                    print(f"⚠️ Same review count: {same_count_streak}/8 (stopping when we hit 8)")
+                    print(f"⚠️ Same review count: {same_count_streak}/4 (stopping when we hit 4)")
                     print(f"📊 Consecutive no-change: {consecutive_no_change}/{max_consecutive_no_change}")
                     
-                    # Only stop if we've found reviews AND hit the same count 8 times
+                    # Only stop if we've found reviews AND hit the same count 4 times
                     # AND we've had enough consecutive attempts with no change
-                    if same_count_streak >= 8 and found_reviews and consecutive_no_change >= max_consecutive_no_change:
-                        print("✅ Same review count detected 8 times with no change - reached the bottom!")
+                    if same_count_streak >= 4 and found_reviews and consecutive_no_change >= max_consecutive_no_change:
+                        print("✅ Same review count detected 4 times with no change - reached the bottom!")
                         break
-                    elif same_count_streak >= 8 and not found_reviews:
-                        print("⚠️ Still no reviews found after 8 attempts, but continuing...")
+                    elif same_count_streak >= 4 and not found_reviews:
+                        print("⚠️ Still no reviews found after 4 attempts, but continuing...")
                         same_count_streak = 0  # Reset streak and keep trying
                 
                 last_review_count = current_count
