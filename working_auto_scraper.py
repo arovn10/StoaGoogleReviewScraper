@@ -886,144 +886,110 @@ class WorkingAutoScraper:
         return filename
 
     def push_to_domo(self, all_property_reviews: Dict[str, List[Dict[str, Any]]], max_retries: int = 3):
-        """Push review data to Domo webhook with retry logic."""
+        """Push review data to Domo webhook with flattened structure - one row per review."""
         try:
-            print(f"🔗 Preparing to push data to Domo webhook...")
+            print(f"🔗 Preparing to push flattened review data to Domo webhook...")
             
-            # Prepare the data for Domo
-            domo_data = {
-                "timestamp": datetime.now().isoformat(),
-                "scraper_version": "working_auto_scraper_v1.0",
-                "total_properties": len(all_property_reviews),
-                "total_reviews": sum(len(reviews) for reviews in all_property_reviews.values()),
-                "properties": {}
-            }
+            # Flatten the data structure - one row per review
+            flattened_reviews = []
             
-            # Add property summary data
-            for property_name, reviews in all_property_reviews.items():
-                domo_data["properties"][property_name] = {
-                    "review_count": len(reviews),
-                    "last_scraped": datetime.now().isoformat()
-                }
-            
-            # Add sample review data (first few reviews from each property for preview)
-            sample_reviews = []
-            for property_name, reviews in all_property_reviews.items():
-                if reviews:
-                    # Take first 3 reviews as sample
-                    sample = reviews[:3]
-                    for review in sample:
-                        sample_reviews.append({
-                            "property": property_name,
-                            "review_text": review.get('review_text', '')[:200] + "..." if len(review.get('review_text', '')) > 200 else review.get('review_text', ''),
-                            "rating": review.get('rating', 'N/A'),
-                            "reviewer_name": review.get('reviewer_name', 'Anonymous'),
-                            "review_date": review.get('review_date', 'N/A')
-                        })
-            
-            domo_data["sample_reviews"] = sample_reviews
-            
-            print(f"📊 Data prepared for Domo:")
-            print(f"   - Total properties: {domo_data['total_properties']}")
-            print(f"   - Total reviews: {domo_data['total_reviews']}")
-            print(f"   - Sample reviews: {len(domo_data['sample_reviews'])}")
-            
-            # Try to push to Domo with retry logic
-            for attempt in range(1, max_retries + 1):
-                try:
-                    print(f"🔄 Attempt {attempt}/{max_retries}: Pushing to Domo...")
-                    
-                    response = requests.post(
-                        self.DOMO_WEBHOOK_URL, 
-                        json=domo_data, 
-                        headers={'Content-Type': 'application/json'},
-                        timeout=30
-                    )
-                    
-                    response.raise_for_status()
-                    print(f"✅ Data pushed to Domo successfully!")
-                    print(f"📦 Status Code: {response.status_code}")
-                    print(f"📦 Response: {response.text}")
-                    
-                    # Also try to push the full review data if the summary was successful
-                    if response.status_code == 200:
-                        print(f"🔄 Pushing full review data to Domo...")
-                        self._push_full_reviews_to_domo(all_property_reviews)
-                    
-                    return True
-                    
-                except requests.exceptions.RequestException as e:
-                    print(f"⚠️ Attempt {attempt} failed: {str(e)}")
-                    if attempt < max_retries:
-                        wait_time = 2 ** attempt  # Exponential backoff
-                        print(f"⏳ Waiting {wait_time} seconds before retry...")
-                        time.sleep(wait_time)
-                    else:
-                        print(f"❌ All {max_retries} attempts failed")
-                        raise
-                        
-        except Exception as e:
-            print(f"❌ Failed to push data to Domo: {str(e)}")
-            return False
-    
-    def _push_full_reviews_to_domo(self, all_property_reviews: Dict[str, List[Dict[str, Any]]]):
-        """Push the full review data to Domo in batches."""
-        try:
-            print(f"📦 Preparing full review data for Domo...")
-            
-            # Flatten all reviews into a single list
-            all_reviews = []
             for property_name, reviews in all_property_reviews.items():
                 for review in reviews:
-                    review_copy = review.copy()
-                    review_copy['property_name'] = property_name
-                    all_reviews.append(review_copy)
+                    # Create a flattened record with all review data
+                    flattened_review = {
+                        'timestamp': datetime.now().isoformat(),
+                        'scraper_version': 'working_auto_scraper_v1.0',
+                        'property_name': property_name,
+                        'review_text': review.get('review_text', ''),
+                        'rating': review.get('rating', ''),
+                        'reviewer_name': review.get('reviewer_name', ''),
+                        'review_date': review.get('review_date', ''),
+                        'review_date_original': review.get('review_date_original', ''),
+                        'review_year': review.get('review_year', ''),
+                        'review_month': review.get('review_month', ''),
+                        'review_month_name': review.get('review_month_name', ''),
+                        'review_day_of_week': review.get('review_day_of_week', ''),
+                        'scraped_at': review.get('scraped_at', ''),
+                        'extraction_method': review.get('extraction_method', ''),
+                        'property_url': review.get('property_url', ''),
+                        'debug_info': review.get('debug_info', '')
+                    }
+                    flattened_reviews.append(flattened_review)
             
-            print(f"📊 Total reviews to push: {len(all_reviews)}")
+            print(f"📊 Flattened {len(flattened_reviews)} reviews for Domo")
             
-            # Push in batches of 100 to avoid payload size issues
+            # Send data in batches to avoid payload size limits
             batch_size = 100
-            total_batches = (len(all_reviews) + batch_size - 1) // batch_size
+            total_batches = (len(flattened_reviews) + batch_size - 1) // batch_size
             
             for batch_num in range(total_batches):
                 start_idx = batch_num * batch_size
-                end_idx = min(start_idx + batch_size, len(all_reviews))
-                batch = all_reviews[start_idx:end_idx]
+                end_idx = min(start_idx + batch_size, len(flattened_reviews))
+                batch_data = flattened_reviews[start_idx:end_idx]
                 
-                batch_data = {
-                    "batch_number": batch_num + 1,
-                    "total_batches": total_batches,
-                    "batch_size": len(batch),
-                    "timestamp": datetime.now().isoformat(),
-                    "reviews": batch
+                # Prepare batch payload
+                batch_payload = {
+                    'batch_number': batch_num + 1,
+                    'total_batches': total_batches,
+                    'batch_size': len(batch_data),
+                    'total_reviews': len(flattened_reviews),
+                    'timestamp': datetime.now().isoformat(),
+                    'scraper_version': 'working_auto_scraper_v1.0',
+                    'reviews': batch_data
                 }
                 
-                print(f"📦 Pushing batch {batch_num + 1}/{total_batches} ({len(batch)} reviews)...")
+                print(f"📦 Sending batch {batch_num + 1}/{total_batches} with {len(batch_data)} reviews...")
                 
-                try:
-                    response = requests.post(
-                        self.DOMO_WEBHOOK_URL,
-                        json=batch_data,
-                        headers={'Content-Type': 'application/json'},
-                        timeout=60
-                    )
-                    
-                    if response.status_code == 200:
-                        print(f"✅ Batch {batch_num + 1} pushed successfully")
-                    else:
-                        print(f"⚠️ Batch {batch_num + 1} failed with status {response.status_code}")
-                        
-                except Exception as e:
-                    print(f"❌ Error pushing batch {batch_num + 1}: {str(e)}")
+                # Send batch to Domo
+                success = self._send_batch_to_domo(batch_payload, max_retries)
+                
+                if not success:
+                    print(f"❌ Failed to send batch {batch_num + 1} after {max_retries} attempts")
+                    return False
                 
                 # Small delay between batches
                 if batch_num < total_batches - 1:
                     time.sleep(1)
             
-            print(f"🎉 Full review data push completed!")
+            print(f"✅ Successfully pushed all {len(flattened_reviews)} reviews to Domo in {total_batches} batches")
+            return True
             
         except Exception as e:
-            print(f"❌ Error in full review data push: {str(e)}")
+            print(f"❌ Error preparing data for Domo: {str(e)}")
+            return False
+    
+    def _send_batch_to_domo(self, batch_payload: Dict[str, Any], max_retries: int = 3) -> bool:
+        """Send a single batch of reviews to Domo with retry logic."""
+        for attempt in range(max_retries):
+            try:
+                print(f"   🔄 Attempt {attempt + 1}/{max_retries}...")
+                
+                response = requests.post(
+                    self.DOMO_WEBHOOK_URL,
+                    json=batch_payload,
+                    headers={'Content-Type': 'application/json'},
+                    timeout=30
+                )
+                
+                if response.status_code == 200:
+                    print(f"   ✅ Batch sent successfully (Status: {response.status_code})")
+                    return True
+                else:
+                    print(f"   ⚠️ Domo returned status {response.status_code}: {response.text}")
+                    
+            except requests.exceptions.RequestException as e:
+                print(f"   ⚠️ Request error (attempt {attempt + 1}): {str(e)}")
+                
+            except Exception as e:
+                print(f"   ⚠️ Unexpected error (attempt {attempt + 1}): {str(e)}")
+            
+            # Wait before retry (exponential backoff)
+            if attempt < max_retries - 1:
+                wait_time = 2 ** attempt
+                print(f"   ⏳ Waiting {wait_time} seconds before retry...")
+                time.sleep(wait_time)
+        
+        return False
 
     def close(self):
         """Close the WebDriver."""

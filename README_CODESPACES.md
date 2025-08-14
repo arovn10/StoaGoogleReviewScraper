@@ -139,27 +139,49 @@ ls -t *.json | head -1 | xargs cat | head -20
 
 ## 🔗 Domo Integration
 
-The scraper automatically pushes data to your Domo instance via webhook:
+The scraper automatically pushes data to your Domo instance via webhook with a **flattened structure**:
 
-### What Gets Pushed:
-- **Summary data**: Property counts, review totals, timestamps
-- **Sample reviews**: First 3 reviews from each property for preview
-- **Full review data**: All reviews in batches of 100 for efficient processing
+### 📊 Data Structure (One Row Per Review)
+Each review gets its own row in Domo with these fields:
 
-### Webhook Features:
-- **Automatic retry**: 3 attempts with exponential backoff
-- **Batch processing**: Large datasets split into manageable chunks
-- **Error handling**: Continues scraping even if Domo push fails
-- **Detailed logging**: Full response information and status codes
+| Field | Description | Example |
+|-------|-------------|---------|
+| `timestamp` | When the data was sent to Domo | `2025-01-20T15:30:45.123456` |
+| `scraper_version` | Version of the scraper | `working_auto_scraper_v1.0` |
+| `property_name` | Name of the property | `The Waters at Hammond` |
+| `review_text` | Full review text | `Great place to live!` |
+| `rating` | Star rating (1-5) | `5` |
+| `reviewer_name` | Name of reviewer | `John Smith` |
+| `review_date` | Converted date | `2025-01-18` |
+| `review_date_original` | Original relative date | `2 days ago` |
+| `review_year` | Year of review | `2025` |
+| `review_month` | Month of review | `1` |
+| `review_month_name` | Month name | `January` |
+| `review_day_of_week` | Day of week | `Saturday` |
+| `scraped_at` | When review was scraped | `2025-01-20T15:25:30.123456` |
+| `extraction_method` | How review was extracted | `maps_lite_specific` |
+| `property_url` | Google Maps URL | `https://maps.google.com/...` |
+| `debug_info` | Additional debug info | `Element text length: 45` |
 
-### Testing:
-```bash
-# Test webhook connection before running scraper
-python test_domo_webhook.py
+### 🚀 What Gets Pushed:
+- **Individual reviews**: Each review becomes a separate row
+- **Batch processing**: Reviews sent in batches of 100 for efficiency
+- **Complete data**: All review fields including metadata
+- **Property identification**: Clear property name for each review
 
-# Run scraper without Domo integration
-python working_auto_scraper.py --headless --no-domo
-```
+### 📈 Expected Domo Results:
+Instead of summary data, you'll now see:
+- **Row 1**: Review 1 from The Waters at Hammond
+- **Row 2**: Review 2 from The Waters at Hammond  
+- **Row 3**: Review 1 from The Flats at East Bay
+- **Row 4**: Review 2 from The Flats at East Bay
+- And so on...
+
+This makes it easy to:
+- Filter by property
+- Analyze individual reviews
+- Create charts and dashboards
+- Export specific review data
 
 ## 📞 Support
 
