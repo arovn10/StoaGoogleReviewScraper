@@ -955,64 +955,59 @@ class WorkingAutoScraper:
             return ""
 
     def push_to_domo(self, all_property_reviews: Dict[str, List[Dict[str, Any]]], max_retries: int = 3):
-        """Push review data to Domo webhook - send raw JSON data directly."""
+        """Push review data to Domo webhook - send raw data structure."""
         try:
-            print(f"🔗 Preparing to push raw JSON data to Domo webhook...")
+            print(f"🔗 Preparing to push raw data to Domo webhook...")
             
-            # Convert the data structure to a flat list of reviews
-            flattened_reviews = []
-            
-            # Handle both property-based and already-flattened structures
-            if isinstance(all_property_reviews, dict):
-                # If it's a dict of properties -> reviews, flatten it
-                for property_name, reviews in all_property_reviews.items():
-                    for review in reviews:
-                        review_copy = review.copy()
-                        review_copy['property_name'] = property_name
-                        flattened_reviews.append(review_copy)
-            elif isinstance(all_property_reviews, list):
-                # If it's already a list, use it directly
-                flattened_reviews = all_property_reviews
-            else:
-                print(f"❌ Unexpected data structure type: {type(all_property_reviews)}")
-                return False
-            
-            print(f"📊 Preparing {len(flattened_reviews)} reviews for Domo")
+            # Send the raw data structure directly to Domo
+            print(f"📊 Sending {len(all_property_reviews)} properties with their reviews to Domo")
             
             # Send data in batches to avoid payload size limits
             batch_size = 100
-            total_batches = (len(flattened_reviews) + batch_size - 1) // batch_size
+            total_batches = 0
+            total_reviews = 0
             
-            for batch_num in range(total_batches):
-                start_idx = batch_num * batch_size
-                end_idx = min(start_idx + batch_size, len(flattened_reviews))
-                batch_data = flattened_reviews[start_idx:end_idx]
+            for property_name, reviews in all_property_reviews.items():
+                total_reviews += len(reviews)
+                # Calculate batches for this property
+                property_batches = (len(reviews) + batch_size - 1) // batch_size
+                total_batches += property_batches
                 
-                # Prepare batch payload - just send the reviews directly
-                batch_payload = {
-                    'batch_number': batch_num + 1,
-                    'total_batches': total_batches,
-                    'batch_size': len(batch_data),
-                    'total_reviews': len(flattened_reviews),
-                    'timestamp': datetime.now().isoformat(),
-                    'scraper_version': 'working_auto_scraper_v1.0',
-                    'reviews': batch_data
-                }
+                for batch_num in range(property_batches):
+                    start_idx = batch_num * batch_size
+                    end_idx = min(start_idx + batch_size, len(reviews))
+                    batch_data = reviews[start_idx:end_idx]
+                    
+                    # Prepare batch payload - send the raw review data
+                    batch_payload = {
+                        'property_name': property_name,
+                        'batch_number': batch_num + 1,
+                        'total_batches_for_property': property_batches,
+                        'batch_size': len(batch_data),
+                        'total_reviews_for_property': len(reviews),
+                        'timestamp': datetime.now().isoformat(),
+                        'scraper_version': 'working_auto_scraper_v1.0',
+                        'reviews': batch_data
+                    }
+                    
+                    print(f"📦 Sending {property_name} batch {batch_num + 1}/{property_batches} with {len(batch_data)} reviews...")
+                    
+                    # Send batch to Domo
+                    success = self._send_batch_to_domo(batch_payload, max_retries)
+                    
+                    if not success:
+                        print(f"❌ Failed to send {property_name} batch {batch_num + 1} after {max_retries} attempts")
+                        return False
+                    
+                    # Small delay between batches
+                    if batch_num < property_batches - 1:
+                        time.sleep(1)
                 
-                print(f"📦 Sending batch {batch_num + 1}/{total_batches} with {len(batch_data)} reviews...")
-                
-                # Send batch to Domo
-                success = self._send_batch_to_domo(batch_payload, max_retries)
-                
-                if not success:
-                    print(f"❌ Failed to send batch {batch_num + 1} after {max_retries} attempts")
-                    return False
-                
-                # Small delay between batches
-                if batch_num < total_batches - 1:
+                # Small delay between properties
+                if property_name != list(all_property_reviews.keys())[-1]:
                     time.sleep(1)
             
-            print(f"✅ Successfully pushed all {len(flattened_reviews)} reviews to Domo in {total_batches} batches")
+            print(f"✅ Successfully pushed all {total_reviews} reviews from {len(all_property_reviews)} properties to Domo in {total_batches} batches")
             return True
             
         except Exception as e:
@@ -1051,61 +1046,6 @@ class WorkingAutoScraper:
                 time.sleep(wait_time)
         
         return False
-
-    def push_to_domo_flat(self, json_filepath: str, max_retries: int = 3):
-        """Push flat JSON data directly to Domo webhook - read the file and send raw data."""
-        try:
-            print(f"🔗 Reading flat JSON file and pushing raw data to Domo...")
-            
-            # Read the flat JSON file
-            with open(json_filepath, 'r', encoding='utf-8') as f:
-                reviews_data = json.load(f)
-            
-            if not isinstance(reviews_data, list):
-                print(f"❌ Expected list of reviews, got {type(reviews_data)}")
-                return False
-            
-            print(f"📊 Found {len(reviews_data)} reviews in JSON file")
-            
-            # Send data in batches to avoid payload size limits
-            batch_size = 100
-            total_batches = (len(reviews_data) + batch_size - 1) // batch_size
-            
-            for batch_num in range(total_batches):
-                start_idx = batch_num * batch_size
-                end_idx = min(start_idx + batch_size, len(reviews_data))
-                batch_data = reviews_data[start_idx:end_idx]
-                
-                # Prepare batch payload - send the raw review data
-                batch_payload = {
-                    'batch_number': batch_num + 1,
-                    'total_batches': total_batches,
-                    'batch_size': len(batch_data),
-                    'total_reviews': len(reviews_data),
-                    'timestamp': datetime.now().isoformat(),
-                    'scraper_version': 'working_auto_scraper_v1.0',
-                    'reviews': batch_data
-                }
-                
-                print(f"📦 Sending batch {batch_num + 1}/{total_batches} with {len(batch_data)} reviews...")
-                
-                # Send batch to Domo
-                success = self._send_batch_to_domo(batch_payload, max_retries)
-                
-                if not success:
-                    print(f"❌ Failed to send batch {batch_num + 1} after {max_retries} attempts")
-                    return False
-                
-                # Small delay between batches
-                if batch_num < total_batches - 1:
-                    time.sleep(1)
-            
-            print(f"✅ Successfully pushed all {len(reviews_data)} reviews to Domo in {total_batches} batches")
-            return True
-            
-        except Exception as e:
-            print(f"❌ Error reading JSON file and pushing to Domo: {str(e)}")
-            return False
 
     def close(self):
         """Close the WebDriver."""
@@ -1157,15 +1097,10 @@ def main():
             else:
                 print("⚠️ Failed to save JSON data")
             
-            # Also export to flat JSON for Domo (this is the actual data structure)
-            print("\n📄 Exporting flat JSON for Domo...")
-            flat_json_file = scraper.export_to_json(all_property_reviews)
-            
             # Push to Domo (unless disabled)
             if not args.no_domo:
                 print("\n🔗 Pushing data to Domo...")
-                # Use the flattened data structure for Domo
-                domo_success = scraper.push_to_domo_flat(flat_json_file)
+                domo_success = scraper.push_to_domo(all_property_reviews)
                 if domo_success:
                     print("✅ Data successfully pushed to Domo!")
                 else:
@@ -1175,7 +1110,6 @@ def main():
             
             print(f"\n🎯 Summary:")
             print(f"   📁 JSON files saved to: data/outputs/")
-            print(f"   📄 Flat JSON exported to: {flat_json_file}")
             print(f"   📊 Total properties: {len(all_property_reviews)}")
             print(f"   📝 Total reviews: {total_reviews}")
             print(f"   🔗 Domo integration: {'Enabled' if not args.no_domo else 'Disabled'}")
