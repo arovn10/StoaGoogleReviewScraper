@@ -39,6 +39,12 @@ pip install -r requirements.txt
 
 ## 🚀 Running the Scraper
 
+### Test Domo Webhook First
+```bash
+# Test the Domo webhook connection before running the scraper
+python test_domo_webhook.py
+```
+
 ### Test Run
 ```bash
 # Run with visible browser (for testing)
@@ -46,6 +52,9 @@ python working_auto_scraper.py
 
 # Run in headless mode (for automation)
 python working_auto_scraper.py --headless
+
+# Run without pushing to Domo (for testing)
+python working_auto_scraper.py --headless --no-domo
 ```
 
 ### Scheduled Run (Cron)
@@ -53,7 +62,7 @@ python working_auto_scraper.py --headless
 # Edit crontab
 crontab -e
 
-# Add this line to run every day at 2 AM
+# Add this line to run every day at 2 AM with Domo integration
 0 2 * * * cd /workspaces/StoaGoogleScraper && python working_auto_scraper.py --headless
 
 # Or run every 6 hours
@@ -123,6 +132,34 @@ ls -t *.json | head -1 | xargs cat | head -20
 - ✅ **Headless mode** for automation
 - ✅ **Comprehensive extraction** using proven logic
 - ✅ **JSON output** for easy data processing
+- ✅ **Domo webhook integration** for automatic data pushing
+- ✅ **Batch processing** for large datasets
+- ✅ **Retry logic** with exponential backoff
+- ✅ **Error handling** and detailed logging
+
+## 🔗 Domo Integration
+
+The scraper automatically pushes data to your Domo instance via webhook:
+
+### What Gets Pushed:
+- **Summary data**: Property counts, review totals, timestamps
+- **Sample reviews**: First 3 reviews from each property for preview
+- **Full review data**: All reviews in batches of 100 for efficient processing
+
+### Webhook Features:
+- **Automatic retry**: 3 attempts with exponential backoff
+- **Batch processing**: Large datasets split into manageable chunks
+- **Error handling**: Continues scraping even if Domo push fails
+- **Detailed logging**: Full response information and status codes
+
+### Testing:
+```bash
+# Test webhook connection before running scraper
+python test_domo_webhook.py
+
+# Run scraper without Domo integration
+python working_auto_scraper.py --headless --no-domo
+```
 
 ## 📞 Support
 

@@ -16,6 +16,7 @@ from fake_useragent import UserAgent
 import json
 import time
 import re
+import requests
 from datetime import datetime
 from typing import List, Dict, Any
 from selenium.webdriver.common.keys import Keys
@@ -24,6 +25,10 @@ class WorkingAutoScraper:
     def __init__(self, headless: bool = False):
         self.driver = None
         self.headless = headless
+        
+        # Domo webhook configuration
+        self.DOMO_WEBHOOK_URL = "https://stoagroup.domo.com/api/iot/v1/webhook/data/eyJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE3NTMzOTI4MDUsInN0cmVhbSI6IjI2ODFmZjgwNDJlODRkMGU5NzI0NjAyYTYxNTE1ZmNmOm1tbW0tMDA0NC0wNTc0OjUyMzIwNTM5NSJ9.zNgtfCRVytV6_RfB17ap-zkyXOYclCfvTUpTewZTOeo"
+        
         self.setup_driver()
         
         # Properties with lite=1 parameter
@@ -880,6 +885,146 @@ class WorkingAutoScraper:
         print(f"💾 JSON exported to: {filename} ({len(flattened_reviews)} reviews)")
         return filename
 
+    def push_to_domo(self, all_property_reviews: Dict[str, List[Dict[str, Any]]], max_retries: int = 3):
+        """Push review data to Domo webhook with retry logic."""
+        try:
+            print(f"🔗 Preparing to push data to Domo webhook...")
+            
+            # Prepare the data for Domo
+            domo_data = {
+                "timestamp": datetime.now().isoformat(),
+                "scraper_version": "working_auto_scraper_v1.0",
+                "total_properties": len(all_property_reviews),
+                "total_reviews": sum(len(reviews) for reviews in all_property_reviews.values()),
+                "properties": {}
+            }
+            
+            # Add property summary data
+            for property_name, reviews in all_property_reviews.items():
+                domo_data["properties"][property_name] = {
+                    "review_count": len(reviews),
+                    "last_scraped": datetime.now().isoformat()
+                }
+            
+            # Add sample review data (first few reviews from each property for preview)
+            sample_reviews = []
+            for property_name, reviews in all_property_reviews.items():
+                if reviews:
+                    # Take first 3 reviews as sample
+                    sample = reviews[:3]
+                    for review in sample:
+                        sample_reviews.append({
+                            "property": property_name,
+                            "review_text": review.get('review_text', '')[:200] + "..." if len(review.get('review_text', '')) > 200 else review.get('review_text', ''),
+                            "rating": review.get('rating', 'N/A'),
+                            "reviewer_name": review.get('reviewer_name', 'Anonymous'),
+                            "review_date": review.get('review_date', 'N/A')
+                        })
+            
+            domo_data["sample_reviews"] = sample_reviews
+            
+            print(f"📊 Data prepared for Domo:")
+            print(f"   - Total properties: {domo_data['total_properties']}")
+            print(f"   - Total reviews: {domo_data['total_reviews']}")
+            print(f"   - Sample reviews: {len(domo_data['sample_reviews'])}")
+            
+            # Try to push to Domo with retry logic
+            for attempt in range(1, max_retries + 1):
+                try:
+                    print(f"🔄 Attempt {attempt}/{max_retries}: Pushing to Domo...")
+                    
+                    response = requests.post(
+                        self.DOMO_WEBHOOK_URL, 
+                        json=domo_data, 
+                        headers={'Content-Type': 'application/json'},
+                        timeout=30
+                    )
+                    
+                    response.raise_for_status()
+                    print(f"✅ Data pushed to Domo successfully!")
+                    print(f"📦 Status Code: {response.status_code}")
+                    print(f"📦 Response: {response.text}")
+                    
+                    # Also try to push the full review data if the summary was successful
+                    if response.status_code == 200:
+                        print(f"🔄 Pushing full review data to Domo...")
+                        self._push_full_reviews_to_domo(all_property_reviews)
+                    
+                    return True
+                    
+                except requests.exceptions.RequestException as e:
+                    print(f"⚠️ Attempt {attempt} failed: {str(e)}")
+                    if attempt < max_retries:
+                        wait_time = 2 ** attempt  # Exponential backoff
+                        print(f"⏳ Waiting {wait_time} seconds before retry...")
+                        time.sleep(wait_time)
+                    else:
+                        print(f"❌ All {max_retries} attempts failed")
+                        raise
+                        
+        except Exception as e:
+            print(f"❌ Failed to push data to Domo: {str(e)}")
+            return False
+    
+    def _push_full_reviews_to_domo(self, all_property_reviews: Dict[str, List[Dict[str, Any]]]):
+        """Push the full review data to Domo in batches."""
+        try:
+            print(f"📦 Preparing full review data for Domo...")
+            
+            # Flatten all reviews into a single list
+            all_reviews = []
+            for property_name, reviews in all_property_reviews.items():
+                for review in reviews:
+                    review_copy = review.copy()
+                    review_copy['property_name'] = property_name
+                    all_reviews.append(review_copy)
+            
+            print(f"📊 Total reviews to push: {len(all_reviews)}")
+            
+            # Push in batches of 100 to avoid payload size issues
+            batch_size = 100
+            total_batches = (len(all_reviews) + batch_size - 1) // batch_size
+            
+            for batch_num in range(total_batches):
+                start_idx = batch_num * batch_size
+                end_idx = min(start_idx + batch_size, len(all_reviews))
+                batch = all_reviews[start_idx:end_idx]
+                
+                batch_data = {
+                    "batch_number": batch_num + 1,
+                    "total_batches": total_batches,
+                    "batch_size": len(batch),
+                    "timestamp": datetime.now().isoformat(),
+                    "reviews": batch
+                }
+                
+                print(f"📦 Pushing batch {batch_num + 1}/{total_batches} ({len(batch)} reviews)...")
+                
+                try:
+                    response = requests.post(
+                        self.DOMO_WEBHOOK_URL,
+                        json=batch_data,
+                        headers={'Content-Type': 'application/json'},
+                        timeout=60
+                    )
+                    
+                    if response.status_code == 200:
+                        print(f"✅ Batch {batch_num + 1} pushed successfully")
+                    else:
+                        print(f"⚠️ Batch {batch_num + 1} failed with status {response.status_code}")
+                        
+                except Exception as e:
+                    print(f"❌ Error pushing batch {batch_num + 1}: {str(e)}")
+                
+                # Small delay between batches
+                if batch_num < total_batches - 1:
+                    time.sleep(1)
+            
+            print(f"🎉 Full review data push completed!")
+            
+        except Exception as e:
+            print(f"❌ Error in full review data push: {str(e)}")
+
     def close(self):
         """Close the WebDriver."""
         if self.driver:
@@ -895,6 +1040,7 @@ def main():
     
     parser = argparse.ArgumentParser(description='Working Auto-Scroll Multi-Property Reviews Scraper')
     parser.add_argument('--headless', action='store_true', help='Run in headless mode')
+    parser.add_argument('--no-domo', action='store_true', help='Skip pushing data to Domo')
     args = parser.parse_args()
     
     scraper = None
@@ -904,6 +1050,7 @@ def main():
         print("=" * 60)
         print("This script combines working logic with auto-scrolling!")
         print(f"Mode: {'Headless' if args.headless else 'Visible browser'}")
+        print(f"Domo Integration: {'Disabled' if args.no_domo else 'Enabled'}")
         print()
         
         scraper = WorkingAutoScraper(headless=args.headless)
@@ -922,6 +1069,16 @@ def main():
             # Export results
             json_file = scraper.export_to_json(all_property_reviews)
             print(f"💾 Results saved to: {json_file}")
+            
+            # Push data to Domo (unless disabled)
+            if not args.no_domo:
+                print(f"\n🔗 Pushing data to Domo...")
+                if scraper.push_to_domo(all_property_reviews):
+                    print(f"✅ Domo integration completed successfully!")
+                else:
+                    print(f"⚠️ Domo integration had issues, but local file was saved")
+            else:
+                print(f"\n⏭️ Skipping Domo integration (--no-domo flag used)")
         else:
             print("❌ No reviews found for any property.")
             
