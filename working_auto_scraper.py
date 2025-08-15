@@ -670,6 +670,61 @@ class WorkingAutoScraper:
                 except NoSuchElementException:
                     continue
             
+            # Add missing fields required for CSV format
+            review_data.update({
+                'review_date_original': review_data.get('review_date', ''),
+                'review_year': 0,  # Changed to integer
+                'review_month': 0,  # Changed to integer
+                'review_month_name': '',
+                'review_day_of_week': '',
+                'property_url': self.driver.current_url if hasattr(self, 'driver') else '',
+                'request.ip': '',
+                'request.timestamp': int(time.time() * 1000),  # Changed to integer timestamp
+                'extraction_method': 'maps_lite_specific' if is_maps_lite else 'standard_extraction',
+                '_BATCH_ID_': 0.0,  # Changed to float
+                '_BATCH_LAST_RUN_': datetime.now().isoformat()  # Keep as ISO timestamp string
+            })
+            
+            # Try to parse the review date to extract year, month, and day of week
+            if review_data.get('review_date'):
+                try:
+                    # Parse relative dates like "2 days ago", "a year ago", etc.
+                    date_text = review_data['review_date'].lower()
+                    current_time = datetime.now()
+                    
+                    if 'year' in date_text:
+                        review_data['review_year'] = current_time.year - 1  # Integer
+                        review_data['review_month'] = current_time.month  # Integer
+                        review_data['review_month_name'] = current_time.strftime('%B')
+                        review_data['review_day_of_week'] = current_time.strftime('%A')
+                    elif 'month' in date_text:
+                        review_data['review_year'] = current_time.year  # Integer
+                        review_data['review_month'] = max(1, current_time.month - 1)  # Integer
+                        review_data['review_month_name'] = (current_time.replace(month=max(1, current_time.month - 1))).strftime('%B')
+                        review_data['review_day_of_week'] = current_time.strftime('%A')
+                    elif 'week' in date_text:
+                        review_data['review_year'] = current_time.year  # Integer
+                        review_data['review_month'] = current_time.month  # Integer
+                        review_data['review_month_name'] = current_time.strftime('%B')
+                        review_data['review_day_of_week'] = current_time.strftime('%A')
+                    elif 'day' in date_text:
+                        review_data['review_year'] = current_time.year  # Integer
+                        review_data['review_month'] = current_time.month  # Integer
+                        review_data['review_month_name'] = current_time.strftime('%B')
+                        review_data['review_day_of_week'] = current_time.strftime('%A')
+                    else:
+                        # Try to parse as actual date
+                        try:
+                            parsed_date = datetime.strptime(review_data['review_date'], '%Y-%m-%d')
+                            review_data['review_year'] = parsed_date.year  # Integer
+                            review_data['review_month'] = parsed_date.month  # Integer
+                            review_data['review_month_name'] = parsed_date.strftime('%B')
+                            review_data['review_day_of_week'] = parsed_date.strftime('%A')
+                        except ValueError:
+                            pass
+                except Exception as e:
+                    print(f"   ⚠️ Could not parse review date: {str(e)}")
+            
             # Only return review if we have at least the text
             if review_data.get('review_text'):
                 return review_data
@@ -848,11 +903,25 @@ class WorkingAutoScraper:
                 matches = re.findall(pattern, page_source, re.IGNORECASE)
                 for match in matches:
                     if len(match.strip()) > 20:
-                        reviews.append({
+                        review_data = {
                             'scraped_at': datetime.now().isoformat(),
                             'review_text': match.strip(),
-                            'extraction_method': 'regex_fallback'
-                        })
+                            'rating': 0,  # Default rating
+                            'reviewer_name': '',  # Default empty name
+                            'review_date': '',  # Default empty date
+                            'review_date_original': '',
+                            'review_year': 0, # Changed to integer
+                            'review_month': 0, # Changed to integer
+                            'review_month_name': '',
+                            'review_day_of_week': '',
+                            'property_url': self.driver.current_url if hasattr(self, 'driver') else '',
+                            'request.ip': '',
+                            'request.timestamp': int(time.time() * 1000), # Changed to integer timestamp
+                            'extraction_method': 'regex_fallback',
+                            '_BATCH_ID_': 0.0, # Changed to float
+                            '_BATCH_LAST_RUN_': datetime.now().isoformat() # Keep as ISO timestamp string
+                        }
+                        reviews.append(review_data)
         except Exception as e:
             print(f"⚠️ Error in broad review extraction: {str(e)}")
         return reviews
@@ -955,80 +1024,91 @@ class WorkingAutoScraper:
             return ""
 
     def push_to_domo(self, all_property_reviews: Dict[str, List[Dict[str, Any]]], max_retries: int = 3):
-        """Push review data to Domo webhook - send raw data structure."""
+        """Push review data to Domo webhook - send ONLY flattened review data matching CSV format."""
         try:
-            print(f"🔗 Preparing to push raw data to Domo webhook...")
+            print(f"🔗 Preparing to push flattened data to Domo webhook...")
             
-            # Send the raw data structure directly to Domo
-            print(f"📊 Sending {len(all_property_reviews)} properties with their reviews to Domo")
+            # Flatten all reviews into individual rows matching CSV format
+            flattened_reviews = []
+            
+            for property_name, reviews in all_property_reviews.items():
+                for review in reviews:
+                    # Create flattened row matching CSV structure exactly
+                    flattened_row = {
+                        'scraped_at': review.get('scraped_at', datetime.now().isoformat()),
+                        'review_text': review.get('review_text', ''),
+                        'rating': review.get('rating', 0),
+                        'reviewer_name': review.get('reviewer_name', ''),
+                        'review_date': review.get('review_date', ''),
+                        'review_date_original': review.get('review_date_original', ''),
+                        'review_year': review.get('review_year', 0), # Changed to integer
+                        'review_month': review.get('review_month', 0), # Changed to integer
+                        'review_month_name': review.get('review_month_name', ''),
+                        'review_day_of_week': review.get('review_day_of_week', ''),
+                        'Property': property_name,
+                        'property_url': review.get('property_url', ''),
+                        'request.ip': review.get('request.ip', ''),
+                        'request.timestamp': review.get('request.timestamp', int(time.time() * 1000)), # Changed to integer timestamp
+                        'extraction_method': review.get('extraction_method', ''),
+                        '_BATCH_ID_': review.get('_BATCH_ID_', 0.0), # Changed to float
+                        '_BATCH_LAST_RUN_': review.get('_BATCH_LAST_RUN_', datetime.now().isoformat()) # Keep as ISO timestamp string
+                    }
+                    flattened_reviews.append(flattened_row)
+            
+            print(f"📊 Total reviews to send: {len(flattened_reviews)}")
             
             # Send data in batches to avoid payload size limits
             batch_size = 100
-            total_batches = 0
-            total_reviews = 0
+            total_batches = (len(flattened_reviews) + batch_size - 1) // batch_size
             
-            for property_name, reviews in all_property_reviews.items():
-                total_reviews += len(reviews)
-                # Calculate batches for this property
-                property_batches = (len(reviews) + batch_size - 1) // batch_size
-                total_batches += property_batches
+            print(f"📦 Sending data in {total_batches} batches of {batch_size} reviews each...")
+            
+            for batch_num in range(total_batches):
+                start_idx = batch_num * batch_size
+                end_idx = min(start_idx + batch_size, len(flattened_reviews))
+                batch_data = flattened_reviews[start_idx:end_idx]
                 
-                for batch_num in range(property_batches):
-                    start_idx = batch_num * batch_size
-                    end_idx = min(start_idx + batch_size, len(reviews))
-                    batch_data = reviews[start_idx:end_idx]
-                    
-                    # Prepare batch payload - send the raw review data
-                    batch_payload = {
-                        'property_name': property_name,
-                        'batch_number': batch_num + 1,
-                        'total_batches_for_property': property_batches,
-                        'batch_size': len(batch_data),
-                        'total_reviews_for_property': len(reviews),
-                        'timestamp': datetime.now().isoformat(),
-                        'scraper_version': 'working_auto_scraper_v1.0',
-                        'reviews': batch_data
-                    }
-                    
-                    print(f"📦 Sending {property_name} batch {batch_num + 1}/{property_batches} with {len(batch_data)} reviews...")
-                    
-                    # Send batch to Domo
-                    success = self._send_batch_to_domo(batch_payload, max_retries)
-                    
-                    if not success:
-                        print(f"❌ Failed to send {property_name} batch {batch_num + 1} after {max_retries} attempts")
-                        return False
-                    
-                    # Small delay between batches
-                    if batch_num < property_batches - 1:
-                        time.sleep(1)
+                # CRITICAL: Send ONLY the flattened review data, not wrapped in metadata
+                # Domo expects an array of review objects, not a nested structure
+                print(f"📦 Sending batch {batch_num + 1}/{total_batches} with {len(batch_data)} reviews...")
                 
-                # Small delay between properties
-                if property_name != list(all_property_reviews.keys())[-1]:
+                # Send batch to Domo - send the array directly, not wrapped in metadata
+                success = self._send_batch_to_domo(batch_data, max_retries)
+                
+                if not success:
+                    print(f"❌ Failed to send batch {batch_num + 1} after {max_retries} attempts")
+                    return False
+                
+                # Small delay between batches
+                if batch_num < total_batches - 1:
                     time.sleep(1)
             
-            print(f"✅ Successfully pushed all {total_reviews} reviews from {len(all_property_reviews)} properties to Domo in {total_batches} batches")
+            print(f"✅ Successfully pushed all {len(flattened_reviews)} reviews to Domo in {total_batches} batches")
+            print(f"📊 Each review will appear as a separate row in Domo, matching the CSV format exactly")
             return True
             
         except Exception as e:
             print(f"❌ Error preparing data for Domo: {str(e)}")
             return False
     
-    def _send_batch_to_domo(self, batch_payload: Dict[str, Any], max_retries: int = 3) -> bool:
+    def _send_batch_to_domo(self, batch_data: List[Dict[str, Any]], max_retries: int = 3) -> bool:
         """Send a single batch of reviews to Domo with retry logic."""
         for attempt in range(max_retries):
             try:
-                print(f"   �� Attempt {attempt + 1}/{max_retries}...")
+                print(f"   🔄 Attempt {attempt + 1}/{max_retries}...")
                 
+                # Send the batch_data array directly to Domo
+                # This should result in each review becoming a separate row
                 response = requests.post(
                     self.DOMO_WEBHOOK_URL,
-                    json=batch_payload,
+                    json=batch_data,  # Send the array directly, not wrapped
                     headers={'Content-Type': 'application/json'},
                     timeout=30
                 )
                 
                 if response.status_code == 200:
                     print(f"   ✅ Batch sent successfully (Status: {response.status_code})")
+                    print(f"   📊 Sent {len(batch_data)} reviews as individual rows")
                     return True
                 else:
                     print(f"   ⚠️ Domo returned status {response.status_code}: {response.text}")
